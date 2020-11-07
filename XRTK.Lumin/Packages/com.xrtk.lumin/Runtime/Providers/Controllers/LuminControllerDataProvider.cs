@@ -1,6 +1,7 @@
 ﻿// Copyright (c) XRTK. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
+using AOT;
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -22,10 +23,18 @@ namespace XRTK.Lumin.Providers.Controllers
     [Guid("851006A2-0762-49AA-80A5-A01C9A8DBB58")]
     public class LuminControllerDataProvider : BaseControllerDataProvider
     {
+        // We need to store an instance because the callbacks below need to be static.
+        private static LuminControllerDataProvider _instance;
+
         /// <inheritdoc />
         public LuminControllerDataProvider(string name, uint priority, LuminControllerDataProviderProfile profile, IMixedRealityInputSystem parentService)
             : base(name, priority, profile, parentService)
         {
+            if (_instance != null)
+            {
+                Debug.LogAssertion("It is expected that there will not be 2 Lumin Controller Data Providers");
+            }
+            _instance = this;
         }
 
         private readonly IntPtr statePointer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(MlInput.MLInputControllerState)) * 2);
@@ -52,16 +61,8 @@ namespace XRTK.Lumin.Providers.Controllers
             {
                 if (MlInput.MLInputCreate(inputConfiguration, ref inputHandle).IsOk)
                 {
-                    controllerCallbacksEx.on_connect += async (id, data) =>
-                    {
-                        await Awaiters.UnityMainThread;
-                        GetController(id);
-                    };
-                    controllerCallbacksEx.on_disconnect += async (id, data) =>
-                    {
-                        await Awaiters.UnityMainThread;
-                        RemoveController(id);
-                    };
+                    controllerCallbacksEx.on_connect += OnConnect;
+                    controllerCallbacksEx.on_disconnect += OnDisconnect;
 
                     if (MlInput.MLInputGetControllerState(inputHandle, statePointer).IsOk)
                     {
@@ -92,9 +93,34 @@ namespace XRTK.Lumin.Providers.Controllers
                 else
                 {
                     MlController.MLControllerGetState(controllerHandle, ref controllerSystemState);
+                    InitConnectedControllers();
                 }
             }
         }
+
+        private void InitConnectedControllers()
+        {
+            for (var i = 0; i < controllerStates.Length; i++)
+            {
+                if (!controllerStates[i].is_connected)
+                    continue;
+
+                GetController((byte)i);
+            }
+        }
+        [MonoPInvokeCallback(typeof(MlInput.MLInputControllerCallbacksEx.on_connect_delegate))]
+        static private async void OnConnect(byte id, IntPtr data)
+        {
+            await Awaiters.UnityMainThread;
+            _instance.GetController(id);
+        }
+        [MonoPInvokeCallback(typeof(MlInput.MLInputControllerCallbacksEx.on_disconnect_delegate))]
+        static private async void OnDisconnect(byte id, IntPtr data)
+        {
+            await Awaiters.UnityMainThread;
+            _instance.RemoveController(id);
+        }
+        
 
         /// <inheritdoc />
         public override void Update()
@@ -150,6 +176,7 @@ namespace XRTK.Lumin.Providers.Controllers
 
             if (inputHandle.IsValid)
             {
+         
                 if (!MlInput.MLInputDestroy(inputHandle).IsOk)
                 {
                     Debug.LogError($"Failed to destroy the input tracker!");
