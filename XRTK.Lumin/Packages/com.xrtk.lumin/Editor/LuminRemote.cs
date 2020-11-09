@@ -134,8 +134,6 @@ namespace XRTK.Lumin.Editor
                 case PlayModeStateChange.ExitingEditMode:
                     if (!isRemoteConfigured)
                     {
-                        EditorApplication.isPlaying = false;
-                        EditorApplication.Beep();
                         Debug.LogError("Lumin Remote is not running! Ensure you've started Magic Leap zero iteration in The Lab.");
                     }
 
